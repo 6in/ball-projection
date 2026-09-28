@@ -96,6 +96,7 @@ input[type="number"] { width: 5.5em; }
 .ball-list th, .ball-list td { border-bottom: 1px solid var(--line); padding: 4px 6px; text-align: left; }
 .ball-list tr.selected td { background: #0b3f48; }
 .ball-list tr.dup td:first-child { color: #ffb020; }
+.ball-list tr.uncertain td:first-child select { border-color: #ffb020; }
 .ball-list td.num { font-variant-numeric: tabular-nums; }
 .ball-list select { padding: 2px 6px; }
 .ball-list button { padding: 2px 8px; }
