@@ -1,7 +1,9 @@
 // Gemini API (REST) をブラウザから直接呼ぶ
 
-const endpoint = (model) =>
-  `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`;
+export const DEFAULT_MODEL = 'gemini-3.8-flash';
+
+const API = 'https://generativelanguage.googleapis.com/v1beta';
+const endpoint = (model) => `${API}/models/${encodeURIComponent(model)}:generateContent`;
 
 const BALL_SCHEMA = {
   type: 'OBJECT',
@@ -73,17 +75,10 @@ async function call({ apiKey, model, image, prompt, schema, signal }) {
           parts: [{ inline_data: { mime_type: image.mimeType, data: image.data } }, { text: prompt }],
         },
       ],
-      generationConfig: { temperature: 0, responseMimeType: 'application/json', responseSchema: schema },
+      generationConfig: { responseMimeType: 'application/json', responseSchema: schema },
     }),
   });
-  if (!res.ok) {
-    let msg = res.statusText;
-    try {
-      msg = (await res.json()).error?.message || msg;
-    } catch {}
-    throw new Error(`Gemini API ${res.status}: ${msg}`);
-  }
-  const json = await res.json();
+  const json = await readJSON(res);
   const cand = json.candidates?.[0];
   const text = (cand?.content?.parts || [])
     .filter((p) => !p.thought)
@@ -91,6 +86,33 @@ async function call({ apiKey, model, image, prompt, schema, signal }) {
     .join('');
   if (!text) throw new Error(`Gemini の応答が空です (${json.promptFeedback?.blockReason || cand?.finishReason || 'unknown'})`);
   return JSON.parse(text.replace(/^```(?:json)?\s*|\s*```$/g, ''));
+}
+
+async function readJSON(res) {
+  if (!res.ok) {
+    let msg = res.statusText;
+    try {
+      msg = (await res.json()).error?.message || msg;
+    } catch {}
+    throw new Error(`Gemini API ${res.status}: ${msg}`);
+  }
+  return res.json();
+}
+
+// generateContent に対応する Gemini モデル (新しい順)
+export async function listModels(apiKey) {
+  const models = [];
+  let pageToken = '';
+  do {
+    const url = `${API}/models?pageSize=1000${pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : ''}`;
+    const json = await readJSON(await fetch(url, { headers: { 'x-goog-api-key': apiKey } }));
+    models.push(...(json.models || []));
+    pageToken = json.nextPageToken;
+  } while (pageToken);
+  return models
+    .filter((m) => m.supportedGenerationMethods?.includes('generateContent') && /^models\/gemini-/.test(m.name))
+    .map((m) => ({ id: m.name.slice('models/'.length), label: m.displayName || '' }))
+    .sort((a, b) => b.id.localeCompare(a.id, undefined, { numeric: true }));
 }
 
 // crop 範囲を最大 maxSide px に縮小して JPEG base64 にする

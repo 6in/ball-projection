@@ -88,12 +88,17 @@
         <input type="password" id="apiKey" autocomplete="off" spellcheck="false">
       </label>
       <label class="field">モデル
-        <input id="model" list="modelList" spellcheck="false">
+        <span class="row">
+          <input id="model" list="modelList" spellcheck="false">
+          <button type="button" id="btnListModels">一覧を取得</button>
+        </span>
       </label>
+      <p class="note" id="modelStatus"></p>
       <datalist id="modelList">
-        <option value="gemini-2.5-flash">
-        <option value="gemini-2.5-pro">
-        <option value="gemini-2.5-flash-lite">
+        <option value="gemini-3.8-flash">
+        <option value="gemini-3.5-flash">
+        <option value="gemini-3.1-pro-preview">
+        <option value="gemini-3.1-flash-lite-preview">
       </datalist>
       <fieldset>
         <legend>カスタム台サイズ (プレイエリア, mm)</legend>
