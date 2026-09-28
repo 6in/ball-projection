@@ -181,9 +181,9 @@ function reportError(e) {
   if (stopped) $('#chkAuto').checked = false;
   const prefix = stopped ? '連続検出を停止しました。' : '';
   if (e.status === 402) {
-    setStatus(`${prefix}Gemini API のクレジットが不足しています (402)。`, 'error', {
+    setStatus(`${prefix}Gemini API の支払い設定を確認してください (402: クレジット残高・利用上限)。`, 'error', {
       href: 'https://ai.studio/projects',
-      text: 'AI Studio で残高を確認',
+      text: 'AI Studio の請求設定を開く',
     });
   } else {
     setStatus(prefix + e.message, 'error');
