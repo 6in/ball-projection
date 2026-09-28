@@ -16,11 +16,8 @@ python3 -m http.server 8000
 
 ## GitHub Pages で公開
 
-`.github/workflows/pages.yml` が `main` への push (または手動実行) でサイトをデプロイする。
-
-1. リポジトリの Settings → Pages → Build and deployment → Source を「GitHub Actions」にする。
-2. `main` に push する (Actions タブから「Deploy to GitHub Pages」を手動実行も可)。
-3. `https://<user>.github.io/<repo>/` で開く。
+Settings → Pages → Source を「Deploy from a branch」、ブランチ `main` / `/ (root)` にする。
+`main` に push すると `https://<user>.github.io/<repo>/` に反映される (`.nojekyll` で Jekyll 処理を無効化)。
 
 ## 使い方
 
