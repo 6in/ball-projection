@@ -88,13 +88,24 @@ async function call({ apiKey, model, image, prompt, schema, signal }) {
   return JSON.parse(text.replace(/^```(?:json)?\s*|\s*```$/g, ''));
 }
 
+export class GeminiError extends Error {
+  constructor(status, message) {
+    super(`Gemini API ${status}: ${message}`);
+    this.status = status;
+  }
+  // 再試行しても直らないエラー (キー不正・クレジット切れ・権限・モデル不在など)
+  get fatal() {
+    return this.status >= 400 && this.status < 500 && this.status !== 408 && this.status !== 429;
+  }
+}
+
 async function readJSON(res) {
   if (!res.ok) {
     let msg = res.statusText;
     try {
       msg = (await res.json()).error?.message || msg;
     } catch {}
-    throw new Error(`Gemini API ${res.status}: ${msg}`);
+    throw new GeminiError(res.status, msg);
   }
   return res.json();
 }
