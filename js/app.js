@@ -1,6 +1,6 @@
 import { computeHomography, applyH } from './homography.js';
 import { TABLE_PRESETS, BALL_R, TopView, renderOverlay, rectify, tableCorners, ballName } from './table.js';
-import { detectBalls, detectCorners, listModels, DEFAULT_MODEL } from './gemini.js';
+import { detectBalls, detectCorners, listModels, DEFAULT_MODEL, GeminiError } from './gemini.js';
 import { kvGet, kvSet, listLayouts, getLayout, putLayout, deleteLayout } from './storage.js';
 
 const $ = (s) => document.querySelector(s);
@@ -159,10 +159,35 @@ async function deleteNamedLayout() {
 
 // ---------- ステータス ----------
 
-function setStatus(text, kind = '') {
+function setStatus(text, kind = '', link = null) {
   const el = $('#status');
   el.textContent = text;
   el.className = `status ${kind}`;
+  if (link) {
+    const a = document.createElement('a');
+    a.href = link.href;
+    a.target = '_blank';
+    a.rel = 'noopener';
+    a.textContent = link.text;
+    el.append(' ', a);
+  }
+}
+
+function reportError(e) {
+  console.error(e);
+  if (!(e instanceof GeminiError)) return setStatus(e.message, 'error');
+  // 再試行しても直らないエラーで連続検出を回し続けない
+  const stopped = e.fatal && $('#chkAuto').checked;
+  if (stopped) $('#chkAuto').checked = false;
+  const prefix = stopped ? '連続検出を停止しました。' : '';
+  if (e.status === 402) {
+    setStatus(`${prefix}Gemini API のクレジットが不足しています (402)。`, 'error', {
+      href: 'https://ai.studio/projects',
+      text: 'AI Studio で残高を確認',
+    });
+  } else {
+    setStatus(prefix + e.message, 'error');
+  }
 }
 
 function updateHint() {
@@ -345,8 +370,7 @@ async function withBusy(label, fn) {
     const msg = await fn();
     setStatus(`${msg} (${((performance.now() - t0) / 1000).toFixed(1)}s)`);
   } catch (e) {
-    console.error(e);
-    setStatus(e.message, 'error');
+    reportError(e);
   } finally {
     state.busy = false;
     document.querySelectorAll('#btnDetect, #btnAutoCorners').forEach((b) => (b.disabled = false));

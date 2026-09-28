@@ -29,6 +29,7 @@ body {
 .status { flex: 1; color: var(--muted); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .status.error { color: var(--danger); }
 .status.busy { color: var(--accent); }
+.status a { color: var(--accent); }
 
 .layout {
   display: grid;
