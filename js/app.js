@@ -1,6 +1,6 @@
 import { computeHomography, applyH } from './homography.js';
 import { TABLE_PRESETS, BALL_R, TopView, renderOverlay, rectify, tableCorners, ballName } from './table.js';
-import { detectBalls, detectCorners } from './gemini.js';
+import { detectBalls, detectCorners, listModels, DEFAULT_MODEL } from './gemini.js';
 import { kvGet, kvSet, listLayouts, getLayout, putLayout, deleteLayout } from './storage.js';
 
 const $ = (s) => document.querySelector(s);
@@ -11,7 +11,7 @@ const video = document.createElement('video');
 video.playsInline = true;
 video.muted = true;
 
-const DEFAULT_SETTINGS = { apiKey: '', model: 'gemini-2.5-flash', table: '9ft', customL: 2540, customW: 1270 };
+const DEFAULT_SETTINGS = { apiKey: '', model: DEFAULT_MODEL, table: '9ft', customL: 2540, customW: 1270 };
 
 const state = {
   settings: { ...DEFAULT_SETTINGS },
@@ -36,6 +36,11 @@ const state = {
 async function loadSettings() {
   try {
     Object.assign(state.settings, await kvGet('settings'));
+    // 提供終了予定の 2.x 系が保存されていたら既定モデルへ移行
+    if (/^gemini-[12]\./.test(state.settings.model)) {
+      state.settings.model = DEFAULT_MODEL;
+      saveSettings();
+    }
   } catch (e) {
     setStatus(`設定を読み込めません: ${e.message}`, 'error');
   }
@@ -657,13 +662,36 @@ function openSettings() {
   $('#customL').value = s.customL;
   $('#customW').value = s.customW;
   dlg.showModal();
+  if (s.apiKey && !modelsLoaded) refreshModels(s.apiKey);
 }
+
+let modelsLoaded = false;
+async function refreshModels(apiKey) {
+  const el = $('#modelStatus');
+  el.textContent = 'モデル一覧を取得中…';
+  try {
+    const models = await listModels(apiKey);
+    const dl = $('#modelList');
+    dl.innerHTML = '';
+    for (const m of models) dl.append(new Option(m.label, m.id));
+    modelsLoaded = true;
+    el.textContent = `${models.length} 件のモデルを取得しました`;
+  } catch (e) {
+    el.textContent = `モデル一覧を取得できません: ${e.message}`;
+  }
+}
+
+$('#btnListModels').onclick = () => {
+  const key = $('#apiKey').value.trim();
+  if (key) refreshModels(key);
+  else $('#modelStatus').textContent = '先に API キーを入力してください';
+};
 
 dlg.addEventListener('close', () => {
   if (dlg.returnValue !== 'ok') return;
   const s = state.settings;
   s.apiKey = $('#apiKey').value.trim();
-  s.model = $('#model').value.trim() || 'gemini-2.5-flash';
+  s.model = $('#model').value.trim() || DEFAULT_MODEL;
   s.customL = +$('#customL').value || 2540;
   s.customW = +$('#customW').value || 1270;
   saveSettings();
