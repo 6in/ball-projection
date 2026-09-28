@@ -1,6 +1,7 @@
 import { computeHomography, applyH } from './homography.js';
 import { TABLE_PRESETS, BALL_R, TopView, renderOverlay, rectify, tableCorners, ballName } from './table.js';
 import { detectBalls, detectCorners } from './gemini.js';
+import { kvGet, kvSet, listLayouts, getLayout, putLayout, deleteLayout } from './storage.js';
 
 const $ = (s) => document.querySelector(s);
 const view = $('#view');
@@ -10,11 +11,10 @@ const video = document.createElement('video');
 video.playsInline = true;
 video.muted = true;
 
-const SETTINGS_KEY = 'bp.settings';
-const LAYOUT_KEY = 'bp.layout';
+const DEFAULT_SETTINGS = { apiKey: '', model: 'gemini-2.5-flash', table: '9ft', customL: 2540, customW: 1270 };
 
 const state = {
-  settings: loadSettings(),
+  settings: { ...DEFAULT_SETTINGS },
   mode: null, // 'live' | 'still'
   stream: null,
   still: document.createElement('canvas'),
@@ -33,34 +33,16 @@ const state = {
 
 // ---------- 設定 ----------
 
-function loadSettings() {
-  const def = { apiKey: '', remember: false, model: 'gemini-2.5-flash', table: '9ft', customL: 2540, customW: 1270 };
-  const s = { ...def, ...readJSON(localStorage, SETTINGS_KEY) };
-  if (!s.apiKey) s.apiKey = safe(() => sessionStorage.getItem('bp.apiKey')) || '';
-  return s;
+async function loadSettings() {
+  try {
+    Object.assign(state.settings, await kvGet('settings'));
+  } catch (e) {
+    setStatus(`設定を読み込めません: ${e.message}`, 'error');
+  }
 }
 
 function saveSettings() {
-  const s = { ...state.settings };
-  if (!s.remember) {
-    safe(() => sessionStorage.setItem('bp.apiKey', s.apiKey));
-    s.apiKey = '';
-  }
-  writeJSON(localStorage, SETTINGS_KEY, s);
-}
-
-function readJSON(store, key) {
-  return safe(() => JSON.parse(store.getItem(key))) || {};
-}
-function writeJSON(store, key, v) {
-  safe(() => store.setItem(key, JSON.stringify(v)));
-}
-function safe(fn) {
-  try {
-    return fn();
-  } catch {
-    return undefined;
-  }
+  kvSet('settings', { ...state.settings }).catch((e) => setStatus(`設定を保存できません: ${e.message}`, 'error'));
 }
 
 function tableSize() {
@@ -70,21 +52,104 @@ function tableSize() {
   return { L: p.length, W: p.width };
 }
 
-function saveLayout() {
-  writeJSON(localStorage, LAYOUT_KEY, {
+// 配置データ (JSON 保存・IndexedDB 共通の形式)
+function layoutData() {
+  const { L, W } = tableSize();
+  const s = state.settings;
+  return {
+    table: { key: s.table, length: L, width: W, unit: 'mm' },
+    balls: state.balls.map((b) => ({ number: b.n, x: +b.x.toFixed(1), y: +b.y.toFixed(1) })),
     corners: state.corners,
-    imageSize: [view.width, view.height],
-    balls: state.balls,
-  });
+    imageSize: state.mode ? [view.width, view.height] : state.pendingSize || [view.width, view.height],
+  };
 }
 
-function loadLayout() {
-  const l = readJSON(localStorage, LAYOUT_KEY);
-  if (Array.isArray(l.balls)) state.balls = l.balls.filter((b) => Number.isFinite(b.x) && Number.isFinite(b.y));
-  if (Array.isArray(l.corners) && l.corners.length <= 4) {
-    state.corners = l.corners;
-    state.pendingSize = l.imageSize;
+function applyLayout(d) {
+  if (!Array.isArray(d?.balls)) throw new Error('balls がありません');
+  const t = d.table;
+  if (t && TABLE_PRESETS[t.key]) {
+    state.settings.table = t.key;
+    if (t.key === 'custom') Object.assign(state.settings, { customL: t.length, customW: t.width });
+    $('#tableSize').value = t.key;
+    saveSettings();
   }
+  state.balls = d.balls
+    .map((b) => ({ n: Number.isInteger(b.number) ? b.number : -1, x: +b.x, y: +b.y }))
+    .filter((b) => Number.isFinite(b.x) && Number.isFinite(b.y));
+  if (Array.isArray(d.corners) && d.corners.length <= 4 && Array.isArray(d.imageSize)) {
+    const [pw, ph] = d.imageSize;
+    if (state.mode) {
+      state.corners = d.corners.map(([x, y]) => [(x * view.width) / pw, (y * view.height) / ph]);
+    } else {
+      // 画像が未読込なら、読込時に setMediaSize で拡縮する
+      state.corners = d.corners.map((p) => [...p]);
+      state.pendingSize = [pw, ph];
+    }
+  }
+  state.selected = -1;
+  state.detections = [];
+  updateH();
+  renderBallList();
+  updateHint();
+}
+
+// 作業中の配置を自動保存
+let saveTimer;
+function saveLayout() {
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => {
+    kvSet('current', layoutData()).catch((e) => setStatus(`配置を保存できません: ${e.message}`, 'error'));
+  }, 300);
+}
+
+async function loadLayout() {
+  try {
+    const d = await kvGet('current');
+    if (d) applyLayout(d);
+  } catch (e) {
+    console.warn(e);
+  }
+}
+
+// 名前付き保存
+async function refreshLayoutList(selectName) {
+  const sel = $('#layoutSelect');
+  const list = await listLayouts();
+  sel.innerHTML = '';
+  sel.add(new Option(list.length ? '保存済みの配置…' : '保存済みの配置なし', ''));
+  for (const l of list) {
+    const d = new Date(l.savedAt);
+    sel.add(new Option(`${l.name} (${l.data.balls.length}個, ${d.toLocaleString()})`, l.name));
+  }
+  sel.value = selectName && list.some((l) => l.name === selectName) ? selectName : '';
+}
+
+async function saveNamedLayout() {
+  const def = $('#layoutSelect').value || new Date().toLocaleString();
+  const name = prompt('配置の名前', def)?.trim();
+  if (!name) return;
+  if ((await getLayout(name)) && name !== $('#layoutSelect').value && !confirm(`「${name}」を上書きしますか？`)) return;
+  await putLayout({ name, savedAt: Date.now(), data: layoutData() });
+  await refreshLayoutList(name);
+  setStatus(`「${name}」を保存しました`);
+}
+
+async function loadNamedLayout() {
+  const name = $('#layoutSelect').value;
+  if (!name) return;
+  const l = await getLayout(name);
+  if (!l) return setStatus('配置が見つかりません', 'error');
+  applyLayout(l.data);
+  saveLayout();
+  setStatus(`「${name}」を読み込みました`);
+}
+
+async function deleteNamedLayout() {
+  const name = $('#layoutSelect').value;
+  if (!name || !confirm(`「${name}」を削除しますか？`)) return;
+  await deleteLayout(name);
+  await refreshLayoutList();
+  setStatus(`「${name}」を削除しました`);
 }
 
 // ---------- ステータス ----------
@@ -588,7 +653,6 @@ const dlg = $('#settingsDialog');
 function openSettings() {
   const s = state.settings;
   $('#apiKey').value = s.apiKey;
-  $('#rememberKey').checked = s.remember;
   $('#model').value = s.model;
   $('#customL').value = s.customL;
   $('#customW').value = s.customW;
@@ -599,11 +663,9 @@ dlg.addEventListener('close', () => {
   if (dlg.returnValue !== 'ok') return;
   const s = state.settings;
   s.apiKey = $('#apiKey').value.trim();
-  s.remember = $('#rememberKey').checked;
   s.model = $('#model').value.trim() || 'gemini-2.5-flash';
   s.customL = +$('#customL').value || 2540;
   s.customW = +$('#customW').value || 1270;
-  if (!s.remember) safe(() => localStorage.removeItem(SETTINGS_KEY));
   saveSettings();
   updateH();
   setStatus('設定を保存しました');
@@ -612,15 +674,8 @@ dlg.addEventListener('close', () => {
 // ---------- 入出力 ----------
 
 function exportJSON() {
-  const { L, W } = tableSize();
-  const data = {
-    table: { length: L, width: W, unit: 'mm' },
-    balls: state.balls.map((b) => ({ number: b.n, x: +b.x.toFixed(1), y: +b.y.toFixed(1) })),
-    corners: state.corners,
-    imageSize: [view.width, view.height],
-  };
   const a = document.createElement('a');
-  a.href = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }));
+  a.href = URL.createObjectURL(new Blob([JSON.stringify(layoutData(), null, 2)], { type: 'application/json' }));
   a.download = `layout-${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
@@ -628,18 +683,8 @@ function exportJSON() {
 
 async function importJSON(file) {
   try {
-    const d = JSON.parse(await file.text());
-    if (!Array.isArray(d.balls)) throw new Error('balls がありません');
-    state.balls = d.balls
-      .map((b) => ({ n: Number.isInteger(b.number) ? b.number : -1, x: +b.x, y: +b.y }))
-      .filter((b) => Number.isFinite(b.x) && Number.isFinite(b.y));
-    if (Array.isArray(d.corners) && d.corners.length === 4 && Array.isArray(d.imageSize)) {
-      const [pw, ph] = d.imageSize;
-      state.corners = d.corners.map(([x, y]) => [(x * view.width) / pw, (y * view.height) / ph]);
-      updateH();
-    }
-    state.selected = -1;
-    changed();
+    applyLayout(JSON.parse(await file.text()));
+    saveLayout();
     setStatus(`${state.balls.length} 個のボールを読み込みました`);
   } catch (e) {
     setStatus(`JSON を読み込めません: ${e.message}`, 'error');
@@ -648,7 +693,9 @@ async function importJSON(file) {
 
 // ---------- 初期化 ----------
 
-function init() {
+async function init() {
+  await loadSettings();
+
   const ts = $('#tableSize');
   for (const [k, p] of Object.entries(TABLE_PRESETS)) ts.add(new Option(p.label, k));
   ts.value = state.settings.table;
@@ -723,6 +770,10 @@ function init() {
     changed();
   };
   $('#btnExport').onclick = exportJSON;
+  const guard = (fn) => () => fn().catch((e) => setStatus(e.message, 'error'));
+  $('#btnSaveLayout').onclick = guard(saveNamedLayout);
+  $('#btnLoadLayout').onclick = guard(loadNamedLayout);
+  $('#btnDeleteLayout').onclick = guard(deleteNamedLayout);
   $('#importInput').onchange = (e) => {
     if (e.target.files[0]) importJSON(e.target.files[0]);
     e.target.value = '';
@@ -738,7 +789,8 @@ function init() {
     }
   }, 500);
 
-  loadLayout();
+  await loadLayout();
+  refreshLayoutList().catch((e) => setStatus(`IndexedDB を使えません: ${e.message}`, 'error'));
   listCameras().catch(() => {});
   renderBallList();
   updateHint();

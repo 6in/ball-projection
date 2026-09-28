@@ -12,7 +12,15 @@ python3 -m http.server 8000
 # http://localhost:8000/
 ```
 
-スマホのカメラを使う場合は HTTPS が必要 (GitHub Pages 等に置く)。ビルド不要、依存なし。
+ビルド不要、依存なし。スマホのカメラを使う場合は HTTPS が必要なので GitHub Pages で公開する。
+
+## GitHub Pages で公開
+
+`.github/workflows/pages.yml` が `main` への push (または手動実行) でサイトをデプロイする。
+
+1. リポジトリの Settings → Pages → Build and deployment → Source を「GitHub Actions」にする。
+2. `main` に push する (Actions タブから「Deploy to GitHub Pages」を手動実行も可)。
+3. `https://<user>.github.io/<repo>/` で開く。
 
 ## 使い方
 
@@ -25,6 +33,7 @@ python3 -m http.server 8000
 4. 「ボール検出」。角が未設定なら角検出も自動で行う。
 5. 誤検出はカメラ画像上 / 仮想台上でドラッグ修正、一覧で番号変更・削除。
 6. カメラ固定なら「連続検出」で一定間隔ごとに再検出。
+7. 「名前を付けて保存」で配置を保存し、一覧から「読込」「削除」。
 
 ## 仕組み
 
@@ -35,6 +44,6 @@ python3 -m http.server 8000
 
 ## 注意
 
-- API キーはブラウザから `generativelanguage.googleapis.com` に直接送る。「このブラウザに保存」を外すとセッション中のみ保持。
+- 設定 (API キー含む)・作業中の配置・名前付き配置はブラウザの IndexedDB (`ball-projection`) に保存する (`js/storage.js`)。API キーはブラウザから `generativelanguage.googleapis.com` に直接送る。空欄で保存するとキーを削除。
 - 台サイズはプリセット (9ft/8ft/7ft) かカスタム。ボールはポケットビリヤード (手球 + 1〜15) 前提。
-- 配置データは JSON で保存・読込可能 (座標単位 mm、原点は角1)。
+- 配置データは JSON ファイルでも保存・読込可能 (座標単位 mm、原点は角1)。

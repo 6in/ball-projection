@@ -65,6 +65,12 @@
         <button id="btnClearBalls">全消去</button>
       </div>
       <div class="toolbar">
+        <select id="layoutSelect" title="保存済みの配置"></select>
+        <button id="btnLoadLayout">読込</button>
+        <button id="btnSaveLayout">名前を付けて保存</button>
+        <button id="btnDeleteLayout">削除</button>
+      </div>
+      <div class="toolbar">
         <button id="btnExport">JSON保存</button>
         <label class="btn">JSON読込<input type="file" id="importInput" accept="application/json,.json" hidden></label>
       </div>
@@ -81,7 +87,6 @@
       <label class="field">Gemini API キー
         <input type="password" id="apiKey" autocomplete="off" spellcheck="false">
       </label>
-      <label><input type="checkbox" id="rememberKey"> このブラウザに保存する (localStorage)</label>
       <label class="field">モデル
         <input id="model" list="modelList" spellcheck="false">
       </label>
@@ -95,7 +100,7 @@
         <label>長辺 <input type="number" id="customL" min="500" step="1"></label>
         <label>短辺 <input type="number" id="customW" min="250" step="1"></label>
       </fieldset>
-      <p class="note">API キーはブラウザから Google の API へ直接送信されます。</p>
+      <p class="note">API キーはこのブラウザの IndexedDB に保存され、Google の API へ直接送信されます。空欄で保存すると削除します。</p>
       <menu>
         <button value="cancel" formnovalidate>キャンセル</button>
         <button value="ok" class="primary">保存</button>
