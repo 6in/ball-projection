@@ -46,3 +46,4 @@ Settings → Pages → Source を「Deploy from a branch」、ブランチ `main
 - 配置データは JSON ファイルでも保存・読込可能 (座標単位 mm、原点は角1)。
 
 ビルド
+デプロイ
