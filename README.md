@@ -44,3 +44,5 @@ Settings → Pages → Source を「Deploy from a branch」、ブランチ `main
 - 設定 (API キー含む)・作業中の配置・名前付き配置はブラウザの IndexedDB (`ball-projection`) に保存する (`js/storage.js`)。API キーはブラウザから `generativelanguage.googleapis.com` に直接送る。空欄で保存するとキーを削除。
 - 台サイズはプリセット (9ft/8ft/7ft) かカスタム。ボールはポケットビリヤード (手球 + 1〜15) 前提。
 - 配置データは JSON ファイルでも保存・読込可能 (座標単位 mm、原点は角1)。
+
+保存
