@@ -63,7 +63,7 @@ Locate the four corners of the playing surface, defined by the inner edges (nose
 At the corner pockets the cushion is cut away, so use the intersection of the two extended cushion nose lines.
 Return exactly 4 points as [y, x] normalized to 0-1000.`;
 
-async function call({ apiKey, model, image, prompt, schema, signal }) {
+async function call({ apiKey, model, image, prompt, schema, signal, parts }) {
   const res = await fetch(endpoint(model), {
     method: 'POST',
     signal,
@@ -72,7 +72,7 @@ async function call({ apiKey, model, image, prompt, schema, signal }) {
       contents: [
         {
           role: 'user',
-          parts: [{ inline_data: { mime_type: image.mimeType, data: image.data } }, { text: prompt }],
+          parts: parts || [imagePart(image), { text: prompt }],
         },
       ],
       generationConfig: { responseMimeType: 'application/json', responseSchema: schema },
@@ -126,9 +126,11 @@ export async function listModels(apiKey) {
     .sort((a, b) => b.id.localeCompare(a.id, undefined, { numeric: true }));
 }
 
+const imagePart = (image) => ({ inline_data: { mime_type: image.mimeType, data: image.data } });
+
 // crop 範囲を最大 maxSide px に縮小して JPEG base64 にする
-function encode(source, crop, maxSide = 1600) {
-  const k = Math.min(1, maxSide / Math.max(crop.w, crop.h));
+function encode(source, crop, maxSide = 1600, upscale = false) {
+  const k = upscale ? maxSide / Math.max(crop.w, crop.h) : Math.min(1, maxSide / Math.max(crop.w, crop.h));
   const c = document.createElement('canvas');
   c.width = Math.round(crop.w * k);
   c.height = Math.round(crop.h * k);
@@ -164,3 +166,66 @@ export async function detectCorners({ apiKey, model, source, signal }) {
   if (pts.length !== 4) throw new Error(`角を 4 点検出できませんでした (${pts.length} 点)`);
   return pts;
 }
+
+const CLASSIFY_SCHEMA = {
+  type: 'OBJECT',
+  properties: {
+    balls: {
+      type: 'ARRAY',
+      items: {
+        type: 'OBJECT',
+        properties: {
+          index: { type: 'INTEGER' },
+          pattern: { type: 'STRING', enum: ['cue', 'solid', 'stripe', 'unknown'] },
+          color: { type: 'STRING' },
+          number_visible: { type: 'BOOLEAN', description: 'true if the printed number itself is readable' },
+          candidates: {
+            type: 'ARRAY',
+            description: 'Up to 3 most likely ball numbers, most likely first',
+            items: {
+              type: 'OBJECT',
+              properties: {
+                number: { type: 'INTEGER', description: '0 = cue ball, 1-15 = object ball' },
+                probability: { type: 'NUMBER', description: '0-1' },
+              },
+              required: ['number', 'probability'],
+            },
+          },
+        },
+        required: ['index', 'candidates'],
+      },
+    },
+  },
+  required: ['balls'],
+};
+
+const CLASSIFY_PROMPT = (count) => `Each image above is a close-up crop of one pool (pocket billiards) ball, labeled "Ball <index>". There are ${count} balls.
+Identify the ball number for each crop. Reference (standard set):
+- 0: cue ball, plain white, no number.
+- Solids (fully colored with a small white circle holding the number): 1 yellow, 2 blue, 3 red, 4 purple, 5 orange, 6 green, 7 maroon/dark brown, 8 black.
+- Stripes (white ball with a wide colored band): 9 yellow, 10 blue, 11 red, 12 purple, 13 orange, 14 green, 15 maroon.
+Tips: first decide solid vs stripe (is there white visible outside the number circle?), then the hue. Red (3/11) vs orange (5/13) vs maroon (7/15) are easily confused; compare saturation and darkness. Purple (4/12) can look dark blue. Read the printed digits when visible.
+Each number appears at most once in a set, but judge each crop on its own evidence.
+Return up to 3 candidates per ball with calibrated probabilities.`;
+
+// 各ボールを拡大して切り出し、番号の候補を確率付きで返す
+export async function classifyBalls({ apiKey, model, source, dets, signal, cropSize = 192 }) {
+  const parts = [];
+  dets.forEach((d, i) => {
+    const s = Math.max(d.box.x1 - d.box.x0, d.box.y1 - d.box.y0) * 1.5;
+    const crop = { x: d.cx - s / 2, y: d.cy - s / 2, w: s, h: s };
+    parts.push({ text: `Ball ${i}:` }, imagePart(encode(source, crop, cropSize, true)));
+  });
+  parts.push({ text: CLASSIFY_PROMPT(dets.length) });
+  const r = await call({ apiKey, model, parts, schema: CLASSIFY_SCHEMA, signal });
+  const out = dets.map(() => []);
+  for (const b of r.balls || []) {
+    if (!Number.isInteger(b.index) || !out[b.index]) continue;
+    out[b.index] = (b.candidates || [])
+      .filter((c) => Number.isInteger(c.number) && c.number >= 0 && c.number <= 15)
+      .map((c) => ({ n: c.number, p: clamp01(+c.probability) }));
+  }
+  return out;
+}
+
+const clamp01 = (v) => (Number.isFinite(v) ? Math.min(1, Math.max(0, v)) : 0);

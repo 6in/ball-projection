@@ -1,6 +1,7 @@
 import { computeHomography, applyH } from './homography.js';
 import { TABLE_PRESETS, BALL_R, TopView, renderOverlay, rectify, tableCorners, ballName } from './table.js';
-import { detectBalls, detectCorners, listModels, DEFAULT_MODEL, GeminiError } from './gemini.js';
+import { detectBalls, detectCorners, classifyBalls, listModels, DEFAULT_MODEL, GeminiError } from './gemini.js';
+import { assignNumbers } from './numbers.js';
 import { kvGet, kvSet, listLayouts, getLayout, putLayout, deleteLayout } from './storage.js';
 
 const $ = (s) => document.querySelector(s);
@@ -11,7 +12,15 @@ const video = document.createElement('video');
 video.playsInline = true;
 video.muted = true;
 
-const DEFAULT_SETTINGS = { apiKey: '', model: DEFAULT_MODEL, table: '9ft', customL: 2540, customW: 1270 };
+const DEFAULT_SETTINGS = {
+  apiKey: '',
+  model: DEFAULT_MODEL,
+  table: '9ft',
+  customL: 2540,
+  customW: 1270,
+  refineNumbers: true, // ボールを拡大して番号を再判定 (API 呼び出し +1 回)
+  uniqueNumbers: true, // 番号を重複させない
+};
 
 const state = {
   settings: { ...DEFAULT_SETTINGS },
@@ -63,7 +72,7 @@ function layoutData() {
   const s = state.settings;
   return {
     table: { key: s.table, length: L, width: W, unit: 'mm' },
-    balls: state.balls.map((b) => ({ number: b.n, x: +b.x.toFixed(1), y: +b.y.toFixed(1) })),
+    balls: state.balls.map((b) => ({ number: b.n, x: +b.x.toFixed(1), y: +b.y.toFixed(1), ...(b.p != null && { p: b.p }) })),
     corners: state.corners,
     imageSize: state.mode ? [view.width, view.height] : state.pendingSize || [view.width, view.height],
   };
@@ -79,7 +88,7 @@ function applyLayout(d) {
     saveSettings();
   }
   state.balls = d.balls
-    .map((b) => ({ n: Number.isInteger(b.number) ? b.number : -1, x: +b.x, y: +b.y }))
+    .map((b) => ({ n: Number.isInteger(b.number) ? b.number : -1, x: +b.x, y: +b.y, ...(Number.isFinite(b.p) && { p: b.p }) }))
     .filter((b) => Number.isFinite(b.x) && Number.isFinite(b.y));
   if (Array.isArray(d.corners) && d.corners.length <= 4 && Array.isArray(d.imageSize)) {
     const [pw, ph] = d.imageSize;
@@ -407,20 +416,53 @@ function runDetect() {
     });
     const { L, W } = tableSize();
     const margin = BALL_R * 3;
+    const onTable = dets
+      .map((d) => ({ d, pos: applyH(state.Hi2t, d.cx, d.cy) }))
+      .filter(({ pos: [x, y] }) => x > -margin && y > -margin && x < L + margin && y < W + margin);
+
+    // 1 回目の番号を弱い候補として持ち、拡大判定の結果と合わせて割り当てる
+    const cands = onTable.map(({ d }) => (d.n >= 0 ? [{ n: d.n, p: 0.3 * (Number.isFinite(d.confidence) ? d.confidence : 1) }] : []));
+    let note = '';
+    if (state.settings.refineNumbers && onTable.length) {
+      setStatus(`${onTable.length} 個の番号を判定中…`, 'busy');
+      try {
+        const refined = await classifyBalls({
+          apiKey: state.settings.apiKey,
+          model: state.settings.model,
+          source: frame,
+          dets: onTable.map(({ d }) => d),
+        });
+        refined.forEach((cs, i) => {
+          if (cs.length) cands[i] = mergeCandidates(cands[i], cs);
+        });
+      } catch (e) {
+        console.error(e);
+        note = ` / 番号の再判定に失敗: ${e.message}`;
+      }
+    }
+    const nums = assignNumbers(cands, state.settings.uniqueNumbers);
+
     state.detections = dets;
-    state.balls = dets
-      .map((d) => {
-        const [x, y] = applyH(state.Hi2t, d.cx, d.cy);
-        return { n: d.n, x, y };
-      })
-      .filter((b) => b.x > -margin && b.y > -margin && b.x < L + margin && b.y < W + margin)
-      .map((b) => ({ ...b, x: clamp(b.x, BALL_R, L - BALL_R), y: clamp(b.y, BALL_R, W - BALL_R) }));
+    state.balls = onTable.map(({ pos: [x, y] }, i) => ({
+      n: nums[i].n,
+      p: +nums[i].p.toFixed(2),
+      x: clamp(x, BALL_R, L - BALL_R),
+      y: clamp(y, BALL_R, W - BALL_R),
+    }));
     state.selected = -1;
     state.dirty = true;
     saveLayout();
     renderBallList();
-    return `${state.balls.length} 個のボールを配置 (検出 ${dets.length})`;
+    const unsure = state.balls.filter((b) => b.n < 0 || b.p < 0.5).length;
+    return `${state.balls.length} 個のボールを配置 (検出 ${dets.length}${unsure ? `, 要確認 ${unsure}` : ''})${note}`;
   });
+}
+
+// 1 回目の候補 (弱い) に拡大判定の候補を加算する
+function mergeCandidates(weak, strong) {
+  const m = new Map();
+  for (const c of [...strong, ...weak]) m.set(c.n, Math.min(1, (m.get(c.n) || 0) + c.p));
+  return [...m].map(([n, p]) => ({ n, p }));
 }
 
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
@@ -522,11 +564,13 @@ function renderBallList() {
     const tr = document.createElement('tr');
     if (i === state.selected) tr.className = 'selected';
     if (b.n >= 0 && counts[b.n] > 1) tr.classList.add('dup');
+    if (b.n < 0 || (b.p != null && b.p < 0.5)) tr.classList.add('uncertain');
     const td0 = document.createElement('td');
     const sel = document.createElement('select');
     ballOptions(sel, b.n);
     sel.onchange = () => {
       b.n = +sel.value;
+      delete b.p; // 手で直したら確定扱い
       changed();
     };
     td0.append(sel);
@@ -685,6 +729,8 @@ function openSettings() {
   $('#model').value = s.model;
   $('#customL').value = s.customL;
   $('#customW').value = s.customW;
+  $('#refineNumbers').checked = s.refineNumbers;
+  $('#uniqueNumbers').checked = s.uniqueNumbers;
   dlg.showModal();
   if (s.apiKey && !modelsLoaded) refreshModels(s.apiKey);
 }
@@ -718,6 +764,8 @@ dlg.addEventListener('close', () => {
   s.model = $('#model').value.trim() || DEFAULT_MODEL;
   s.customL = +$('#customL').value || 2540;
   s.customW = +$('#customW').value || 1270;
+  s.refineNumbers = $('#refineNumbers').checked;
+  s.uniqueNumbers = $('#uniqueNumbers').checked;
   saveSettings();
   updateH();
   setStatus('設定を保存しました');
