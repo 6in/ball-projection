@@ -1,14 +1,15 @@
 // URL クエリでの配置共有
-//   ?v=1&title=<タイトル>&table=9ft|2540x1270&balls=<番号>_<x>_<y>.<番号>_<x>_<y>...
+//   ?v=1&title=<タイトル>&memo=<メモ>&table=9ft|2540x1270&balls=<番号>_<x>_<y>.<番号>_<x>_<y>...
 // 座標は mm の整数。区切りに "_" と "." を使うのは URLSearchParams がエスケープしない文字だから。
 // カメラの角座標は撮影環境ごとに違うので含めない。
 
 import { TABLE_PRESETS } from './table.js';
 
-export function encodeShare({ title, table, balls }) {
+export function encodeShare({ title, memo, table, balls }) {
   const q = new URLSearchParams();
   q.set('v', '1');
   if (title) q.set('title', title);
+  if (memo) q.set('memo', memo);
   q.set('table', table.key !== 'custom' && TABLE_PRESETS[table.key] ? table.key : `${Math.round(table.length)}x${Math.round(table.width)}`);
   q.set('balls', balls.map((b) => `${b.number}_${Math.round(b.x)}_${Math.round(b.y)}`).join('.'));
   return q.toString();
@@ -35,7 +36,7 @@ export function decodeShare(search) {
       return { number: Number.isInteger(n) && n >= -1 && n <= 15 ? n : -1, x, y };
     })
     .filter((b) => Number.isFinite(b.x) && Number.isFinite(b.y));
-  return { title: q.get('title') || '', table, balls };
+  return { title: q.get('title') || '', memo: q.get('memo') || '', table, balls };
 }
 
-export const SHARE_KEYS = ['v', 'title', 'table', 'balls'];
+export const SHARE_KEYS = ['v', 'title', 'memo', 'table', 'balls'];

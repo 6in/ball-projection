@@ -70,33 +70,45 @@ export function drawBall(ctx, cx, cy, r, n, { selected = false, alpha = 1 } = {}
   ctx.restore();
 }
 
-// 真上から見た仮想台
+// 真上から見た仮想台。vertical のときは時計回りに 90° 回して縦長に描く
 export class TopView {
   constructor(canvas, pxWidth = 1400) {
     this.canvas = canvas;
     this.pxWidth = pxWidth;
+    this.vertical = false;
   }
 
-  setTable(L, W) {
+  setTable(L, W, vertical = this.vertical) {
     this.L = L;
     this.W = W;
+    this.vertical = vertical;
     this.rail = L * 0.055;
     this.s = this.pxWidth / (L + 2 * this.rail);
-    this.canvas.width = this.pxWidth;
-    this.canvas.height = Math.round((W + 2 * this.rail) * this.s);
+    // 横向き基準の描画サイズ
+    this.landW = this.pxWidth;
+    this.landH = Math.round((W + 2 * this.rail) * this.s);
+    this.canvas.width = vertical ? this.landH : this.landW;
+    this.canvas.height = vertical ? this.landW : this.landH;
   }
 
-  // 背景用に補正画像を作る範囲 (mm)
+  // 背景用に補正画像を作る範囲 (mm)。画像は横向き基準 (landW x landH) で作る
   get extent() {
     return { x0: -this.rail, y0: -this.rail, x1: this.L + this.rail, y1: this.W + this.rail };
   }
 
-  toCanvas(x, y) {
+  // 台座標 -> 横向き基準の描画座標
+  land(x, y) {
     return [(x + this.rail) * this.s, (y + this.rail) * this.s];
   }
 
+  toCanvas(x, y) {
+    const [lx, ly] = this.land(x, y);
+    return this.vertical ? [this.landH - ly, lx] : [lx, ly];
+  }
+
   toTable(px, py) {
-    return [px / this.s - this.rail, py / this.s - this.rail];
+    const [lx, ly] = this.vertical ? [py, this.landH - px] : [px, py];
+    return [lx / this.s - this.rail, ly / this.s - this.rail];
   }
 
   // クライアント座標 -> 台座標
@@ -108,15 +120,18 @@ export class TopView {
   }
 
   render({ balls, selected = -1, bg = null, ballAlpha = 1, grid = {} }) {
-    const { canvas, L, W, rail, s } = this;
+    const { canvas, L, W, rail, s, landW, landH } = this;
     const ctx = canvas.getContext('2d');
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, canvas.width, canvas.height);
+    // 台は横向き基準で描き、縦向きなら変換で回す (ボールの番号は回さないので後で描く)
+    if (this.vertical) ctx.setTransform(0, 1, -1, 0, landH, 0);
 
     if (bg) {
-      ctx.drawImage(bg, 0, 0, canvas.width, canvas.height);
+      ctx.drawImage(bg, 0, 0, landW, landH);
     } else {
       ctx.fillStyle = '#5a3a22';
-      roundRect(ctx, 0, 0, canvas.width, canvas.height, rail * s * 0.4);
+      roundRect(ctx, 0, 0, landW, landH, rail * s * 0.4);
       ctx.fill();
       ctx.fillStyle = '#0f6b45';
       ctx.fillRect(rail * s, rail * s, L * s, W * s);
@@ -131,7 +146,7 @@ export class TopView {
     const pr = 60 * s;
     ctx.fillStyle = bg ? 'rgba(0,0,0,.35)' : '#111';
     for (const [x, y] of [[0, 0], [L / 2, 0], [L, 0], [0, W], [L / 2, W], [L, W]]) {
-      const [cx, cy] = this.toCanvas(x, y);
+      const [cx, cy] = this.land(x, y);
       const dy = y === 0 ? -pr * 0.4 : pr * 0.4;
       ctx.beginPath();
       ctx.arc(cx, cy + (x === L / 2 ? dy : 0), pr, 0, Math.PI * 2);
@@ -141,7 +156,7 @@ export class TopView {
     // ダイヤモンド
     ctx.fillStyle = bg ? '#fff' : '#e8dcc0';
     const dia = (x, y) => {
-      const [cx, cy] = this.toCanvas(x, y);
+      const [cx, cy] = this.land(x, y);
       ctx.beginPath();
       ctx.arc(cx, cy, 5, 0, Math.PI * 2);
       ctx.fill();
@@ -158,8 +173,8 @@ export class TopView {
 
     // ポイント (ダイヤモンド) ごとのグリッド。長辺は L/8、短辺は W/4 間隔。半ポイントはその中間
     const line = (x0, y0, x1, y1) => {
-      const [ax, ay] = this.toCanvas(x0, y0);
-      const [bx, by] = this.toCanvas(x1, y1);
+      const [ax, ay] = this.land(x0, y0);
+      const [bx, by] = this.land(x1, y1);
       ctx.beginPath();
       ctx.moveTo(ax, ay);
       ctx.lineTo(bx, by);
@@ -185,20 +200,21 @@ export class TopView {
     ctx.lineWidth = 1;
     ctx.setLineDash([6, 6]);
     ctx.beginPath();
-    const [hx0, hy0] = this.toCanvas(L / 4, 0);
-    const [, hy1] = this.toCanvas(L / 4, W);
+    const [hx0, hy0] = this.land(L / 4, 0);
+    const [, hy1] = this.land(L / 4, W);
     ctx.moveTo(hx0, hy0);
     ctx.lineTo(hx0, hy1);
     ctx.stroke();
     ctx.setLineDash([]);
     for (const x of [L / 4, (L * 3) / 4]) {
-      const [cx, cy] = this.toCanvas(x, W / 2);
+      const [cx, cy] = this.land(x, W / 2);
       ctx.fillStyle = 'rgba(255,255,255,.6)';
       ctx.beginPath();
       ctx.arc(cx, cy, 3, 0, Math.PI * 2);
       ctx.fill();
     }
 
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
     balls.forEach((b, i) => {
       const [cx, cy] = this.toCanvas(b.x, b.y);
       drawBall(ctx, cx, cy, BALL_R * s, b.n, { selected: i === selected, alpha: ballAlpha });

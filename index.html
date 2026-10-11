@@ -13,9 +13,67 @@
     <button id="btnSettings">設定</button>
   </header>
 
-  <main class="layout">
-    <section class="panel">
-      <div class="panel-head"><h2>カメラ / 画像</h2></div>
+  <nav class="tabs" role="tablist">
+    <button role="tab" data-tab="layout" aria-selected="true">配置</button>
+    <button role="tab" data-tab="camera" aria-selected="false">カメラ</button>
+  </nav>
+
+  <main>
+    <!-- 配置: ボールを手で並べて保存・共有する (メイン) -->
+    <section class="tab-panel layout-tab" id="tab-layout">
+      <div class="table-area">
+        <div class="title-row">
+          <input id="titleInput" class="title-input" placeholder="タイトル (例: 2025 世界選手権 決勝 第7ラック)" maxlength="100">
+        </div>
+        <details class="memo">
+          <summary>メモ</summary>
+          <textarea id="memoInput" rows="3" maxlength="500" placeholder="試合名・選手・年・出典など"></textarea>
+        </details>
+        <div class="table-wrap"><canvas id="top"></canvas></div>
+        <div class="palette" id="palette" aria-label="ボール"></div>
+        <p class="hint" id="layoutHint"></p>
+      </div>
+
+      <div class="side">
+        <div class="toolbar">
+          <button id="btnUndo" disabled>元に戻す</button>
+          <button id="btnDeleteBall">選択を削除</button>
+          <button id="btnClearBalls">全消去</button>
+        </div>
+        <div class="toolbar">
+          <select id="tableSize" title="台サイズ"></select>
+          <label><input type="checkbox" id="chkGridPoint"> ポイント線</label>
+          <label><input type="checkbox" id="chkGridHalf"> 半ポイント線</label>
+        </div>
+
+        <h3>保存・共有</h3>
+        <div class="toolbar">
+          <button id="btnShare" class="primary">URLで共有</button>
+          <button id="btnSaveLayout">名前を付けて保存</button>
+        </div>
+        <div class="toolbar">
+          <select id="layoutSelect" title="保存済みの配置"></select>
+          <button id="btnLoadLayout">読込</button>
+          <button id="btnDeleteLayout">削除</button>
+        </div>
+        <div class="toolbar">
+          <button id="btnExport">JSON保存</button>
+          <button id="btnExportAll">保存データを書き出し</button>
+          <label class="btn">JSON読込<input type="file" id="importInput" accept="application/json,.json" hidden></label>
+        </div>
+
+        <details class="coords">
+          <summary>ボール座標</summary>
+          <table class="ball-list">
+            <thead><tr><th>ボール</th><th>x (mm)</th><th>y (mm)</th><th></th></tr></thead>
+            <tbody id="ballList"></tbody>
+          </table>
+        </details>
+      </div>
+    </section>
+
+    <!-- カメラ: 写真・カメラから読み取り / 実際の台に重ねて表示 (オプション) -->
+    <section class="tab-panel panel" id="tab-camera" hidden>
       <div class="toolbar">
         <select id="cameraSelect" title="カメラ"></select>
         <button id="btnCamera">カメラ開始</button>
@@ -36,7 +94,7 @@
 
       <div class="stage">
         <canvas id="view"></canvas>
-        <div class="placeholder" id="placeholder">カメラを開始するか画像を開いてください</div>
+        <div class="placeholder" id="placeholder">カメラを開始するか画像を開いてください。<br>台の4隅を指定すると、「配置」タブの配置を実際の台に重ねて表示します。</div>
       </div>
 
       <div class="toolbar">
@@ -45,43 +103,9 @@
         <label><input type="checkbox" id="chkBalls" checked> ボール</label>
         <label><input type="checkbox" id="chkLabels" checked> 番号</label>
         <label><input type="checkbox" id="chkBoxes"> 検出枠</label>
+        <label><input type="checkbox" id="chkBg"> 仮想台の背景にカメラ補正画像</label>
       </div>
       <p class="hint" id="hint"></p>
-    </section>
-
-    <section class="panel">
-      <div class="panel-head">
-        <h2>仮想台 <span id="layoutTitle" class="layout-title"></span></h2>
-        <select id="tableSize" title="台サイズ"></select>
-      </div>
-      <canvas id="top"></canvas>
-      <div class="toolbar">
-        <label><input type="checkbox" id="chkGridPoint"> ポイント線</label>
-        <label><input type="checkbox" id="chkGridHalf"> 半ポイント線</label>
-        <label><input type="checkbox" id="chkBg"> カメラ補正画像を背景に表示</label>
-      </div>
-      <div class="toolbar">
-        <select id="addBallSelect" title="追加するボール"></select>
-        <button id="btnAddBall">ボール追加</button>
-        <button id="btnDeleteBall">選択を削除</button>
-        <button id="btnClearBalls">全消去</button>
-      </div>
-      <div class="toolbar">
-        <select id="layoutSelect" title="保存済みの配置"></select>
-        <button id="btnLoadLayout">読込</button>
-        <button id="btnSaveLayout">名前を付けて保存</button>
-        <button id="btnDeleteLayout">削除</button>
-      </div>
-      <div class="toolbar">
-        <button id="btnShare">URLで共有</button>
-        <button id="btnExport">JSON保存</button>
-        <button id="btnExportAll">保存データを書き出し</button>
-        <label class="btn">JSON読込<input type="file" id="importInput" accept="application/json,.json" hidden></label>
-      </div>
-      <table class="ball-list">
-        <thead><tr><th>ボール</th><th>x (mm)</th><th>y (mm)</th><th></th></tr></thead>
-        <tbody id="ballList"></tbody>
-      </table>
     </section>
   </main>
 
