@@ -107,7 +107,7 @@ export class TopView {
     return this.toTable(px, py);
   }
 
-  render({ balls, selected = -1, bg = null, ballAlpha = 1 }) {
+  render({ balls, selected = -1, bg = null, ballAlpha = 1, grid = {} }) {
     const { canvas, L, W, rail, s } = this;
     const ctx = canvas.getContext('2d');
     ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -154,6 +154,30 @@ export class TopView {
     for (let i = 1; i < 4; i++) {
       dia(-rail / 2, (W * i) / 4);
       dia(L + rail / 2, (W * i) / 4);
+    }
+
+    // ポイント (ダイヤモンド) ごとのグリッド。長辺は L/8、短辺は W/4 間隔。半ポイントはその中間
+    const line = (x0, y0, x1, y1) => {
+      const [ax, ay] = this.toCanvas(x0, y0);
+      const [bx, by] = this.toCanvas(x1, y1);
+      ctx.beginPath();
+      ctx.moveTo(ax, ay);
+      ctx.lineTo(bx, by);
+      ctx.stroke();
+    };
+    if (grid.half) {
+      ctx.strokeStyle = bg ? 'rgba(255,255,255,.35)' : 'rgba(255,255,255,.18)';
+      ctx.lineWidth = 1;
+      ctx.setLineDash([4, 4]);
+      for (let i = 1; i < 16; i += 2) line((L * i) / 16, 0, (L * i) / 16, W);
+      for (let i = 1; i < 8; i += 2) line(0, (W * i) / 8, L, (W * i) / 8);
+      ctx.setLineDash([]);
+    }
+    if (grid.point) {
+      ctx.strokeStyle = bg ? 'rgba(255,255,255,.6)' : 'rgba(255,255,255,.32)';
+      ctx.lineWidth = 1.5;
+      for (let i = 1; i < 8; i++) line((L * i) / 8, 0, (L * i) / 8, W);
+      for (let i = 1; i < 4; i++) line(0, (W * i) / 4, L, (W * i) / 4);
     }
 
     // ヘッドストリング / スポット

@@ -20,6 +20,8 @@ const DEFAULT_SETTINGS = {
   customW: 1270,
   refineNumbers: true, // ボールを拡大して番号を再判定 (API 呼び出し +1 回)
   uniqueNumbers: true, // 番号を重複させない
+  gridPoint: true, // 仮想台のポイント線
+  gridHalf: false, // 仮想台の半ポイント線
 };
 
 const state = {
@@ -486,7 +488,13 @@ function render(now) {
   const { L, W } = tableSize();
   if (topView.L !== L || topView.W !== W) topView.setTable(L, W);
   const bg = state.bgWanted ? state.bg : null;
-  topView.render({ balls: state.balls, selected: state.selected, bg, ballAlpha: bg ? +$('#opacity').value : 1 });
+  topView.render({
+    balls: state.balls,
+    selected: state.selected,
+    bg,
+    ballAlpha: bg ? +$('#opacity').value : 1,
+    grid: { point: state.settings.gridPoint, half: state.settings.gridHalf },
+  });
   state.dirty = false;
 }
 
@@ -844,6 +852,14 @@ async function init() {
 
   for (const id of ['#opacity', '#chkTable', '#chkBalls', '#chkLabels', '#chkBoxes'])
     $(id).addEventListener('input', () => (state.dirty = true));
+  for (const [id, key] of [['#chkGridPoint', 'gridPoint'], ['#chkGridHalf', 'gridHalf']]) {
+    $(id).checked = state.settings[key];
+    $(id).onchange = () => {
+      state.settings[key] = $(id).checked;
+      saveSettings();
+      state.dirty = true;
+    };
+  }
   $('#chkBg').onchange = () => {
     state.bgWanted = $('#chkBg').checked;
     state.bg = null;
