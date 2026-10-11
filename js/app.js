@@ -543,6 +543,7 @@ function render(now) {
     bg,
     ballAlpha: bg ? +$('#opacity').value : 1,
     grid: { point: state.settings.gridPoint, half: state.settings.gridHalf },
+    guide: topDrag && !topDrag.out ? topDrag.i : -1,
   });
   state.dirty = false;
 }
