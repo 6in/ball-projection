@@ -2,6 +2,7 @@ import { computeHomography, applyH } from './homography.js';
 import { TABLE_PRESETS, BALL_R, TopView, renderOverlay, rectify, tableCorners, ballName } from './table.js';
 import { detectBalls, detectCorners, classifyBalls, listModels, DEFAULT_MODEL, GeminiError } from './gemini.js';
 import { assignNumbers } from './numbers.js';
+import { encodeShare, decodeShare, SHARE_KEYS } from './share.js';
 import { kvGet, kvSet, listLayouts, getLayout, putLayout, deleteLayout } from './storage.js';
 
 const $ = (s) => document.querySelector(s);
@@ -40,6 +41,7 @@ const state = {
   bgAt: 0,
   busy: false,
   dirty: true,
+  title: '',
 };
 
 // ---------- 設定 ----------
@@ -73,6 +75,7 @@ function layoutData() {
   const { L, W } = tableSize();
   const s = state.settings;
   return {
+    title: state.title,
     table: { key: s.table, length: L, width: W, unit: 'mm' },
     balls: state.balls.map((b) => ({ number: b.n, x: +b.x.toFixed(1), y: +b.y.toFixed(1), ...(b.p != null && { p: b.p }) })),
     corners: state.corners,
@@ -102,11 +105,18 @@ function applyLayout(d) {
       state.pendingSize = [pw, ph];
     }
   }
+  setTitle(d.title || '');
   state.selected = -1;
   state.detections = [];
   updateH();
   renderBallList();
   updateHint();
+}
+
+function setTitle(t) {
+  state.title = t;
+  $('#layoutTitle').textContent = t;
+  $('#layoutTitle').title = t;
 }
 
 // 作業中の配置を自動保存
@@ -141,9 +151,11 @@ async function refreshLayoutList(selectName) {
 }
 
 async function saveNamedLayout() {
-  const def = $('#layoutSelect').value || new Date().toLocaleString();
+  const def = state.title || $('#layoutSelect').value || new Date().toLocaleString();
   const name = prompt('配置の名前', def)?.trim();
   if (!name) return;
+  setTitle(name);
+  saveLayout();
   if ((await getLayout(name)) && name !== $('#layoutSelect').value && !confirm(`「${name}」を上書きしますか？`)) return;
   await putLayout({ name, savedAt: Date.now(), data: layoutData() });
   await refreshLayoutList(name);
@@ -155,7 +167,7 @@ async function loadNamedLayout() {
   if (!name) return;
   const l = await getLayout(name);
   if (!l) return setStatus('配置が見つかりません', 'error');
-  applyLayout(l.data);
+  applyLayout({ ...l.data, title: name });
   saveLayout();
   setStatus(`「${name}」を読み込みました`);
 }
@@ -782,22 +794,106 @@ dlg.addEventListener('close', () => {
 
 // ---------- 入出力 ----------
 
-function exportJSON() {
+function download(data, filename) {
   const a = document.createElement('a');
-  a.href = URL.createObjectURL(new Blob([JSON.stringify(layoutData(), null, 2)], { type: 'application/json' }));
-  a.download = `layout-${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
+  a.href = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }));
+  a.download = filename;
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }
 
+const stamp = () => new Date().toISOString().replace(/[:.]/g, '-');
+const safeName = (s) => s.replace(/[\\/:*?"<>|]+/g, '_').slice(0, 60);
+
+function exportJSON() {
+  download(layoutData(), `layout-${state.title ? safeName(state.title) : stamp()}.json`);
+}
+
+// 名前付きで保存した配置をまとめて書き出す
+async function exportAllLayouts() {
+  const layouts = await listLayouts();
+  if (!layouts.length) return setStatus('保存済みの配置がありません', 'error');
+  download({ format: 'ball-projection-layouts', version: 1, exportedAt: new Date().toISOString(), layouts }, `layouts-${stamp()}.json`);
+  setStatus(`${layouts.length} 件の配置を書き出しました`);
+}
+
+// 1 件の配置 (JSON保存の形式) と、まとめて書き出した形式の両方を受け付ける
 async function importJSON(file) {
   try {
-    applyLayout(JSON.parse(await file.text()));
+    const d = JSON.parse(await file.text());
+    if (Array.isArray(d.layouts)) return await importLayouts(d.layouts);
+    applyLayout(d);
     saveLayout();
     setStatus(`${state.balls.length} 個のボールを読み込みました`);
   } catch (e) {
     setStatus(`JSON を読み込めません: ${e.message}`, 'error');
   }
+}
+
+async function importLayouts(items) {
+  const valid = items.filter((l) => typeof l?.name === 'string' && l.name && Array.isArray(l.data?.balls));
+  if (!valid.length) throw new Error('配置が含まれていません');
+  const existing = new Set((await listLayouts()).map((l) => l.name));
+  const dups = valid.filter((l) => existing.has(l.name));
+  const overwrite = dups.length > 0 && confirm(`${valid.length} 件中 ${dups.length} 件が同名です。上書きしますか？ (キャンセルで同名はスキップ)`);
+  let n = 0;
+  for (const l of valid) {
+    if (existing.has(l.name) && !overwrite) continue;
+    await putLayout({ name: l.name, savedAt: Number.isFinite(l.savedAt) ? l.savedAt : Date.now(), data: l.data });
+    n++;
+  }
+  await refreshLayoutList();
+  setStatus(`${n} 件の配置を取り込みました${valid.length - n ? ` (${valid.length - n} 件スキップ)` : ''}`);
+}
+
+// ---------- URL 共有 ----------
+
+function shareURL() {
+  const d = layoutData();
+  return `${location.origin}${location.pathname}?${encodeShare(d)}`;
+}
+
+async function shareLayout() {
+  const title = prompt('共有するタイトル', state.title || $('#layoutSelect').value || '')?.trim();
+  if (title == null) return;
+  setTitle(title);
+  saveLayout();
+  const url = shareURL();
+  if (navigator.share) {
+    try {
+      await navigator.share({ title: title || 'Ball Projection', url });
+      return setStatus('共有しました');
+    } catch (e) {
+      if (e.name === 'AbortError') return;
+    }
+  }
+  try {
+    await navigator.clipboard.writeText(url);
+    setStatus('共有 URL をコピーしました');
+  } catch {
+    prompt('共有 URL', url);
+  }
+}
+
+// 起動時に URL の共有パラメータを読み込む。角 (カメラ依存) は今のまま使う
+function loadSharedFromURL() {
+  let d;
+  try {
+    d = decodeShare(location.search);
+  } catch (e) {
+    return setStatus(`共有 URL を読めません: ${e.message}`, 'error');
+  }
+  if (!d) return;
+  const label = d.title ? `「${d.title}」` : '';
+  if (!state.balls.length || confirm(`共有された配置${label}を読み込みますか？ 作業中の配置は置き換わります。`)) {
+    applyLayout(d);
+    saveLayout();
+    setStatus(`共有された配置${label}を読み込みました (${state.balls.length} 個)`);
+  }
+  const q = new URLSearchParams(location.search);
+  SHARE_KEYS.forEach((k) => q.delete(k));
+  const rest = q.toString();
+  history.replaceState(null, '', location.pathname + (rest ? `?${rest}` : '') + location.hash);
 }
 
 // ---------- 初期化 ----------
@@ -889,6 +985,8 @@ async function init() {
   $('#btnExport').onclick = exportJSON;
   const guard = (fn) => () => fn().catch((e) => setStatus(e.message, 'error'));
   $('#btnSaveLayout').onclick = guard(saveNamedLayout);
+  $('#btnExportAll').onclick = guard(exportAllLayouts);
+  $('#btnShare').onclick = guard(shareLayout);
   $('#btnLoadLayout').onclick = guard(loadNamedLayout);
   $('#btnDeleteLayout').onclick = guard(deleteNamedLayout);
   $('#importInput').onchange = (e) => {
@@ -912,6 +1010,7 @@ async function init() {
   renderBallList();
   updateHint();
   if (!state.settings.apiKey) setStatus('右上の「設定」で Gemini API キーを入力してください');
+  loadSharedFromURL();
   requestAnimationFrame(render);
 }
 

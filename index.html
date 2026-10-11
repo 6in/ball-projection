@@ -51,7 +51,7 @@
 
     <section class="panel">
       <div class="panel-head">
-        <h2>仮想台</h2>
+        <h2>仮想台 <span id="layoutTitle" class="layout-title"></span></h2>
         <select id="tableSize" title="台サイズ"></select>
       </div>
       <canvas id="top"></canvas>
@@ -73,7 +73,9 @@
         <button id="btnDeleteLayout">削除</button>
       </div>
       <div class="toolbar">
+        <button id="btnShare">URLで共有</button>
         <button id="btnExport">JSON保存</button>
+        <button id="btnExportAll">保存データを書き出し</button>
         <label class="btn">JSON読込<input type="file" id="importInput" accept="application/json,.json" hidden></label>
       </div>
       <table class="ball-list">
