@@ -1,5 +1,5 @@
 import { computeHomography, applyH } from './homography.js';
-import { TABLE_PRESETS, BALL_R, TopView, renderOverlay, rectify, tableCorners, ballName } from './table.js';
+import { TABLE_PRESETS, BALL_R, TopView, renderOverlay, rectify, tableCorners, ballName, drawBall } from './table.js';
 import { detectBalls, detectCorners, classifyBalls, listModels, DEFAULT_MODEL, GeminiError } from './gemini.js';
 import { assignNumbers } from './numbers.js';
 import { encodeShare, decodeShare, SHARE_KEYS } from './share.js';
@@ -42,6 +42,8 @@ const state = {
   busy: false,
   dirty: true,
   title: '',
+  memo: '',
+  armed: null, // パレットで選んだ、次に置くボール番号
 };
 
 // ---------- 設定 ----------
@@ -76,6 +78,7 @@ function layoutData() {
   const s = state.settings;
   return {
     title: state.title,
+    memo: state.memo,
     table: { key: s.table, length: L, width: W, unit: 'mm' },
     balls: state.balls.map((b) => ({ number: b.n, x: +b.x.toFixed(1), y: +b.y.toFixed(1), ...(b.p != null && { p: b.p }) })),
     corners: state.corners,
@@ -106,17 +109,42 @@ function applyLayout(d) {
     }
   }
   setTitle(d.title || '');
+  setMemo(d.memo || '');
   state.selected = -1;
   state.detections = [];
   updateH();
   renderBallList();
+  updatePalette();
   updateHint();
 }
 
 function setTitle(t) {
   state.title = t;
-  $('#layoutTitle').textContent = t;
-  $('#layoutTitle').title = t;
+  $('#titleInput').value = t;
+}
+
+function setMemo(t) {
+  state.memo = t;
+  $('#memoInput').value = t;
+  if (t) $('#memoInput').closest('details').open = true;
+}
+
+// ---------- 元に戻す ----------
+
+const undoStack = [];
+function pushUndo(snapshot = JSON.stringify(state.balls)) {
+  undoStack.push(snapshot);
+  if (undoStack.length > 50) undoStack.shift();
+  $('#btnUndo').disabled = false;
+}
+
+function undo() {
+  const snap = undoStack.pop();
+  $('#btnUndo').disabled = !undoStack.length;
+  if (!snap) return;
+  state.balls = JSON.parse(snap);
+  state.selected = -1;
+  changed();
 }
 
 // 作業中の配置を自動保存
@@ -167,6 +195,7 @@ async function loadNamedLayout() {
   if (!name) return;
   const l = await getLayout(name);
   if (!l) return setStatus('配置が見つかりません', 'error');
+  pushUndo();
   applyLayout({ ...l.data, title: name });
   saveLayout();
   setStatus(`「${name}」を読み込みました`);
@@ -457,6 +486,7 @@ function runDetect() {
     const nums = assignNumbers(cands, state.settings.uniqueNumbers);
 
     state.detections = dets;
+    pushUndo();
     state.balls = onTable.map(({ pos: [x, y] }, i) => ({
       n: nums[i].n,
       p: +nums[i].p.toFixed(2),
@@ -498,7 +528,8 @@ function render(now) {
     state.bgAt = now;
   }
   const { L, W } = tableSize();
-  if (topView.L !== L || topView.W !== W) topView.setTable(L, W);
+  const vertical = window.innerHeight > window.innerWidth;
+  if (topView.L !== L || topView.W !== W || topView.vertical !== vertical) topView.setTable(L, W, vertical);
   const bg = state.bgWanted ? state.bg : null;
   topView.render({
     balls: state.balls,
@@ -558,11 +589,11 @@ function drawCameraOverlay() {
 function buildBackground() {
   const frame = state.mode === 'live' ? currentFrame() : state.still;
   const src = frame.getContext('2d').getImageData(0, 0, frame.width, frame.height);
-  const tc = topView.canvas;
-  const img = rectify(src, state.Ht2i, topView.extent, tc.width, tc.height);
+  const { landW, landH } = topView;
+  const img = rectify(src, state.Ht2i, topView.extent, landW, landH);
   const c = document.createElement('canvas');
-  c.width = tc.width;
-  c.height = tc.height;
+  c.width = landW;
+  c.height = landH;
   c.getContext('2d').putImageData(img, 0, 0);
   return c;
 }
@@ -590,6 +621,7 @@ function renderBallList() {
     const sel = document.createElement('select');
     ballOptions(sel, b.n);
     sel.onchange = () => {
+      pushUndo();
       b.n = +sel.value;
       delete b.p; // 手で直したら確定扱い
       changed();
@@ -598,6 +630,7 @@ function renderBallList() {
     const del = document.createElement('button');
     del.textContent = '削除';
     del.onclick = () => {
+      pushUndo();
       state.balls.splice(i, 1);
       state.selected = -1;
       changed();
@@ -624,6 +657,7 @@ function cell(v) {
 function changed(persist = true) {
   state.dirty = true;
   renderBallList();
+  updatePalette();
   if (persist) saveLayout();
 }
 
@@ -666,6 +700,7 @@ view.addEventListener('pointerdown', (e) => {
   } else if (state.Ht2i && state.balls.length) {
     const h = near(state.balls.map((b) => applyH(state.Ht2i, b.x, b.y)));
     if (h.d < tol * 1.5) {
+      pushUndo();
       drag = { kind: 'ball', i: h.i };
       state.selected = h.i;
       changed(false);
@@ -700,8 +735,54 @@ function moveBall(i, x, y) {
   state.dirty = true;
 }
 
+// ---------- パレット・仮想台での配置 ----------
+
+function buildPalette() {
+  const pal = $('#palette');
+  for (let n = 0; n <= 15; n++) {
+    const btn = document.createElement('button');
+    btn.dataset.n = n;
+    btn.title = ballName(n);
+    const c = document.createElement('canvas');
+    c.width = c.height = 68;
+    drawBall(c.getContext('2d'), 34, 34, 30, n);
+    btn.append(c);
+    btn.onclick = () => {
+      const idx = state.balls.findIndex((b) => b.n === n);
+      if (idx >= 0) {
+        state.selected = idx;
+        state.armed = null;
+      } else {
+        state.armed = state.armed === n ? null : n;
+      }
+      changed(false);
+    };
+    pal.append(btn);
+  }
+}
+
+function updatePalette() {
+  const placed = new Set(state.balls.map((b) => b.n));
+  for (const btn of $('#palette').children) {
+    const n = +btn.dataset.n;
+    btn.classList.toggle('placed', placed.has(n));
+    btn.classList.toggle('armed', state.armed === n);
+  }
+  $('#layoutHint').textContent =
+    state.armed != null
+      ? `${ballName(state.armed)} を置く場所を台の上でタップ`
+      : 'ボールを選んで台の上をタップすると配置。ドラッグで移動、台の外へドラッグすると削除。';
+}
+
 let topDrag = null;
 const topCanvas = topView.canvas;
+// 台の外 (クッションから半レール以上外) か
+const outsideTable = (x, y) => {
+  const { L, W } = tableSize();
+  const m = topView.rail / 2;
+  return x < -m || y < -m || x > L + m || y > W + m;
+};
+
 topCanvas.addEventListener('pointerdown', (e) => {
   const [x, y] = topView.eventToTable(e);
   let best = -1, bd = Infinity;
@@ -709,10 +790,21 @@ topCanvas.addEventListener('pointerdown', (e) => {
     const d = Math.hypot(b.x - x, b.y - y);
     if (d < bd) (bd = d), (best = i);
   });
-  if (best >= 0 && bd < BALL_R * 1.8) {
-    topDrag = { i: best, dx: state.balls[best].x - x, dy: state.balls[best].y - y };
+  // 実寸のボールは小さいので、つかめる範囲は画面上で最低 22px 相当にする
+  const r = topCanvas.getBoundingClientRect();
+  const mmPerCssPx = topCanvas.width / r.width / topView.s;
+  if (best >= 0 && bd < Math.max(BALL_R * 1.8, 22 * mmPerCssPx)) {
+    topDrag = { i: best, dx: state.balls[best].x - x, dy: state.balls[best].y - y, before: JSON.stringify(state.balls), out: false };
     state.selected = best;
+    state.armed = null;
     topCanvas.setPointerCapture(e.pointerId);
+  } else if (state.armed != null && !outsideTable(x, y)) {
+    const { L, W } = tableSize();
+    pushUndo();
+    state.balls.push({ n: state.armed, x: clamp(x, BALL_R, L - BALL_R), y: clamp(y, BALL_R, W - BALL_R) });
+    state.selected = state.balls.length - 1;
+    state.armed = null;
+    return changed();
   } else {
     state.selected = -1;
   }
@@ -721,18 +813,29 @@ topCanvas.addEventListener('pointerdown', (e) => {
 topCanvas.addEventListener('pointermove', (e) => {
   if (!topDrag) return;
   const [x, y] = topView.eventToTable(e);
+  topDrag.out = outsideTable(x, y);
   moveBall(topDrag.i, x + topDrag.dx, y + topDrag.dy);
 });
 ['pointerup', 'pointercancel'].forEach((t) =>
   topCanvas.addEventListener(t, () => {
-    if (topDrag) changed();
+    if (!topDrag) return;
+    if (topDrag.out) {
+      state.balls.splice(topDrag.i, 1);
+      state.selected = -1;
+    }
+    if (JSON.stringify(state.balls) !== topDrag.before) pushUndo(topDrag.before);
     topDrag = null;
+    changed();
   })
 );
 
 document.addEventListener('keydown', (e) => {
   if (e.target.closest('input,select,textarea,dialog')) return;
-  if ((e.key === 'Delete' || e.key === 'Backspace') && state.selected >= 0) {
+  if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
+    undo();
+    e.preventDefault();
+  } else if ((e.key === 'Delete' || e.key === 'Backspace') && state.selected >= 0) {
+    pushUndo();
     state.balls.splice(state.selected, 1);
     state.selected = -1;
     changed();
@@ -822,6 +925,7 @@ async function importJSON(file) {
   try {
     const d = JSON.parse(await file.text());
     if (Array.isArray(d.layouts)) return await importLayouts(d.layouts);
+    pushUndo();
     applyLayout(d);
     saveLayout();
     setStatus(`${state.balls.length} 個のボールを読み込みました`);
@@ -854,10 +958,13 @@ function shareURL() {
 }
 
 async function shareLayout() {
-  const title = prompt('共有するタイトル', state.title || $('#layoutSelect').value || '')?.trim();
-  if (title == null) return;
-  setTitle(title);
-  saveLayout();
+  let title = state.title.trim();
+  if (!title) {
+    title = prompt('共有するタイトル', $('#layoutSelect').value || '')?.trim();
+    if (title == null) return;
+    setTitle(title);
+    saveLayout();
+  }
   const url = shareURL();
   if (navigator.share) {
     try {
@@ -886,6 +993,7 @@ function loadSharedFromURL() {
   if (!d) return;
   const label = d.title ? `「${d.title}」` : '';
   if (!state.balls.length || confirm(`共有された配置${label}を読み込みますか？ 作業中の配置は置き換わります。`)) {
+    pushUndo();
     applyLayout(d);
     saveLayout();
     setStatus(`共有された配置${label}を読み込みました (${state.balls.length} 個)`);
@@ -909,7 +1017,18 @@ async function init() {
     saveSettings();
     updateH();
   };
-  ballOptions($('#addBallSelect'), 0);
+  buildPalette();
+  initTabs();
+  $('#titleInput').oninput = () => {
+    state.title = $('#titleInput').value;
+    saveLayout();
+  };
+  $('#memoInput').oninput = () => {
+    state.memo = $('#memoInput').value;
+    saveLayout();
+  };
+  $('#btnUndo').onclick = undo;
+  window.addEventListener('resize', () => (state.dirty = true));
 
   $('#btnSettings').onclick = openSettings;
   $('#btnCamera').onclick = () => (state.stream ? stopCamera() : startCamera());
@@ -963,20 +1082,16 @@ async function init() {
     state.dirty = true;
   };
 
-  $('#btnAddBall').onclick = () => {
-    const { L, W } = tableSize();
-    const n = +$('#addBallSelect').value;
-    state.balls.push({ n, x: L / 2 + (Math.random() - 0.5) * 100, y: W / 2 + (Math.random() - 0.5) * 100 });
-    state.selected = state.balls.length - 1;
-    changed();
-  };
   $('#btnDeleteBall').onclick = () => {
     if (state.selected < 0) return;
+    pushUndo();
     state.balls.splice(state.selected, 1);
     state.selected = -1;
     changed();
   };
   $('#btnClearBalls').onclick = () => {
+    if (!state.balls.length) return;
+    pushUndo();
     state.balls = [];
     state.detections = [];
     state.selected = -1;
@@ -1005,6 +1120,7 @@ async function init() {
   }, 500);
 
   await loadLayout();
+  updatePalette();
   refreshLayoutList().catch((e) => setStatus(`IndexedDB を使えません: ${e.message}`, 'error'));
   listCameras().catch(() => {});
   renderBallList();
@@ -1012,6 +1128,22 @@ async function init() {
   if (!state.settings.apiKey) setStatus('右上の「設定」で Gemini API キーを入力してください');
   loadSharedFromURL();
   requestAnimationFrame(render);
+}
+
+function initTabs() {
+  const show = (name) => {
+    for (const b of document.querySelectorAll('.tabs [data-tab]')) b.setAttribute('aria-selected', b.dataset.tab === name);
+    for (const p of document.querySelectorAll('.tab-panel')) p.hidden = p.id !== `tab-${name}`;
+    state.dirty = true;
+  };
+  for (const b of document.querySelectorAll('.tabs [data-tab]')) {
+    b.onclick = () => {
+      show(b.dataset.tab);
+      state.settings.tab = b.dataset.tab;
+      saveSettings();
+    };
+  }
+  show(state.settings.tab === 'camera' ? 'camera' : 'layout');
 }
 
 function confirmReset() {
