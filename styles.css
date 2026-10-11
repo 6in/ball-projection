@@ -49,7 +49,8 @@ body {
   min-width: 0;
 }
 .panel-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.panel h2 { font-size: 15px; margin: 0 0 8px; }
+.panel h2 { font-size: 15px; margin: 0 0 8px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.layout-title { color: var(--accent); font-weight: 500; margin-left: 6px; }
 
 .toolbar {
   display: flex;
