@@ -507,6 +507,7 @@ function drawCameraOverlay() {
       showBalls: $('#chkBalls').checked,
       showLabels: $('#chkLabels').checked,
       selected: state.selected,
+      grid: { point: state.settings.gridPoint, half: state.settings.gridHalf },
     });
   }
   const lw = Math.max(1.5, view.width / 700);

@@ -232,10 +232,21 @@ export function renderOverlay(ctx, Ht2i, L, W, balls, opt) {
     ctx.fill();
     ctx.stroke();
 
-    ctx.strokeStyle = 'rgba(0,229,255,.55)';
-    ctx.lineWidth = lw * 0.6;
-    for (let i = 1; i < 8; i++) path(ctx, [P((L * i) / 8, 0), P((L * i) / 8, W)]), ctx.stroke();
-    for (let i = 1; i < 4; i++) path(ctx, [P(0, (W * i) / 4), P(L, (W * i) / 4)]), ctx.stroke();
+    const grid = opt.grid || { point: true };
+    if (grid.half) {
+      ctx.strokeStyle = 'rgba(0,229,255,.4)';
+      ctx.lineWidth = lw * 0.5;
+      ctx.setLineDash([lw * 3, lw * 3]);
+      for (let i = 1; i < 16; i += 2) path(ctx, [P((L * i) / 16, 0), P((L * i) / 16, W)]), ctx.stroke();
+      for (let i = 1; i < 8; i += 2) path(ctx, [P(0, (W * i) / 8), P(L, (W * i) / 8)]), ctx.stroke();
+      ctx.setLineDash([]);
+    }
+    if (grid.point) {
+      ctx.strokeStyle = 'rgba(0,229,255,.55)';
+      ctx.lineWidth = lw * 0.6;
+      for (let i = 1; i < 8; i++) path(ctx, [P((L * i) / 8, 0), P((L * i) / 8, W)]), ctx.stroke();
+      for (let i = 1; i < 4; i++) path(ctx, [P(0, (W * i) / 4), P(L, (W * i) / 4)]), ctx.stroke();
+    }
   }
 
   if (opt.showBalls) {
