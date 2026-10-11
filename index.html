@@ -31,12 +31,16 @@
         </details>
         <div class="table-wrap"><canvas id="top"></canvas></div>
         <div class="palette" id="palette" aria-label="ボール"></div>
+        <div class="toolbar quick" id="quickActions">
+          <button id="btnUndo" disabled>元に戻す</button>
+          <button id="btnShare" class="primary">URLで共有</button>
+          <button id="btnSaveLayout">保存</button>
+        </div>
         <p class="hint" id="layoutHint"></p>
       </div>
 
       <div class="side">
         <div class="toolbar">
-          <button id="btnUndo" disabled>元に戻す</button>
           <button id="btnDeleteBall">選択を削除</button>
           <button id="btnClearBalls">全消去</button>
         </div>
@@ -46,11 +50,7 @@
           <label><input type="checkbox" id="chkGridHalf"> 半ポイント線</label>
         </div>
 
-        <h3>保存・共有</h3>
-        <div class="toolbar">
-          <button id="btnShare" class="primary">URLで共有</button>
-          <button id="btnSaveLayout">名前を付けて保存</button>
-        </div>
+        <h3>保存した配置</h3>
         <div class="toolbar">
           <select id="layoutSelect" title="保存済みの配置"></select>
           <button id="btnLoadLayout">読込</button>

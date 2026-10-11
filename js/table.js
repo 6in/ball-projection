@@ -181,7 +181,7 @@ export class TopView {
       ctx.stroke();
     };
     if (grid.half) {
-      ctx.strokeStyle = bg ? 'rgba(255,255,255,.35)' : 'rgba(255,255,255,.18)';
+      ctx.strokeStyle = bg ? 'rgba(255,255,255,.4)' : 'rgba(255,255,255,.28)';
       ctx.lineWidth = 1;
       ctx.setLineDash([4, 4]);
       for (let i = 1; i < 16; i += 2) line((L * i) / 16, 0, (L * i) / 16, W);
