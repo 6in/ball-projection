@@ -22,7 +22,7 @@ const DEFAULT_SETTINGS = {
   refineNumbers: true, // ボールを拡大して番号を再判定 (API 呼び出し +1 回)
   uniqueNumbers: true, // 番号を重複させない
   gridPoint: true, // 仮想台のポイント線
-  gridHalf: false, // 仮想台の半ポイント線
+  gridHalf: true, // 仮想台の半ポイント線
 };
 
 const state = {
@@ -51,6 +51,12 @@ const state = {
 async function loadSettings() {
   try {
     Object.assign(state.settings, await kvGet('settings'));
+    // 半ポイント線を既定で表示に変更したので、以前の設定 (既定オフ) は一度オンにする
+    if (!state.settings.gridVer) {
+      state.settings.gridHalf = true;
+      state.settings.gridVer = 2;
+      saveSettings();
+    }
     // 提供終了予定の 2.x 系が保存されていたら既定モデルへ移行
     if (/^gemini-[12]\./.test(state.settings.model)) {
       state.settings.model = DEFAULT_MODEL;
@@ -675,6 +681,21 @@ function viewPoint(e) {
 
 let drag = null;
 
+view.addEventListener(
+  'touchstart',
+  (e) => {
+    if (e.touches.length !== 1 || !state.mode) return;
+    const p = viewPoint(e.touches[0]);
+    const tol = hitTolerance();
+    const nearBall = state.Ht2i && state.balls.some((b) => {
+      const [u, v] = applyH(state.Ht2i, b.x, b.y);
+      return Math.hypot(u - p[0], v - p[1]) < tol * 1.5;
+    });
+    if (state.editCorners || nearBall) e.preventDefault();
+  },
+  { passive: false }
+);
+
 view.addEventListener('pointerdown', (e) => {
   if (!state.mode) return;
   const p = viewPoint(e);
@@ -783,17 +804,33 @@ const outsideTable = (x, y) => {
   return x < -m || y < -m || x > L + m || y > W + m;
 };
 
-topCanvas.addEventListener('pointerdown', (e) => {
-  const [x, y] = topView.eventToTable(e);
+// 台座標 (x, y) の近くのボール。実寸のボールは小さいので、つかめる範囲は画面上で最低 22px 相当にする
+function hitTopBall(x, y) {
   let best = -1, bd = Infinity;
   state.balls.forEach((b, i) => {
     const d = Math.hypot(b.x - x, b.y - y);
     if (d < bd) (bd = d), (best = i);
   });
-  // 実寸のボールは小さいので、つかめる範囲は画面上で最低 22px 相当にする
   const r = topCanvas.getBoundingClientRect();
   const mmPerCssPx = topCanvas.width / r.width / topView.s;
-  if (best >= 0 && bd < Math.max(BALL_R * 1.8, 22 * mmPerCssPx)) {
+  return best >= 0 && bd < Math.max(BALL_R * 1.8, 22 * mmPerCssPx) ? best : -1;
+}
+
+// ボールに触れたとき・配置待ちのときだけスクロールを止める。それ以外は台の上でもページをスクロールできる
+topCanvas.addEventListener(
+  'touchstart',
+  (e) => {
+    if (e.touches.length !== 1) return;
+    const [x, y] = topView.eventToTable(e.touches[0]);
+    if (state.armed != null || hitTopBall(x, y) >= 0) e.preventDefault();
+  },
+  { passive: false }
+);
+
+topCanvas.addEventListener('pointerdown', (e) => {
+  const [x, y] = topView.eventToTable(e);
+  const best = hitTopBall(x, y);
+  if (best >= 0) {
     topDrag = { i: best, dx: state.balls[best].x - x, dy: state.balls[best].y - y, before: JSON.stringify(state.balls), out: false };
     state.selected = best;
     state.armed = null;
@@ -1028,7 +1065,11 @@ async function init() {
     saveLayout();
   };
   $('#btnUndo').onclick = undo;
-  window.addEventListener('resize', () => (state.dirty = true));
+  window.addEventListener('resize', () => {
+    state.dirty = true;
+    requestAnimationFrame(fitTable);
+  });
+  $('#memoInput').closest('details').addEventListener('toggle', fitTable);
 
   $('#btnSettings').onclick = openSettings;
   $('#btnCamera').onclick = () => (state.stream ? stopCamera() : startCamera());
@@ -1130,11 +1171,20 @@ async function init() {
   requestAnimationFrame(render);
 }
 
+// 台とパレット・操作ボタンが 1 画面に収まるよう、台の表示高さを決める
+function fitTable() {
+  if ($('#tab-layout').hidden) return;
+  const top = topCanvas.getBoundingClientRect().top + window.scrollY;
+  const below = $('#palette').offsetHeight + $('#quickActions').offsetHeight + 40;
+  topCanvas.style.maxHeight = `${Math.max(240, window.innerHeight - top - below)}px`;
+}
+
 function initTabs() {
   const show = (name) => {
     for (const b of document.querySelectorAll('.tabs [data-tab]')) b.setAttribute('aria-selected', b.dataset.tab === name);
     for (const p of document.querySelectorAll('.tab-panel')) p.hidden = p.id !== `tab-${name}`;
     state.dirty = true;
+    requestAnimationFrame(fitTable);
   };
   for (const b of document.querySelectorAll('.tabs [data-tab]')) {
     b.onclick = () => {
