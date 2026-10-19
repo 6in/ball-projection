@@ -54,14 +54,20 @@ const CORNER_SCHEMA = {
         required: ['point'],
       },
     },
+    long_rails: {
+      type: 'STRING',
+      enum: ['top_bottom', 'left_right'],
+      description: 'Which pair of table edges, as seen in the image, are the long rails (the ones with the side pockets in the middle)',
+    },
   },
-  required: ['corners'],
+  required: ['corners', 'long_rails'],
 };
 
 const CORNER_PROMPT = `This image shows a pool (pocket billiards) table.
 Locate the four corners of the playing surface, defined by the inner edges (noses) of the cushions.
 At the corner pockets the cushion is cut away, so use the intersection of the two extended cushion nose lines.
-Return exactly 4 points as [y, x] normalized to 0-1000.`;
+Return exactly 4 points as [y, x] normalized to 0-1000.
+Also report long_rails: the long rails are the two rails that each have a side (middle) pocket. Answer "top_bottom" if, in the image, they are the upper and lower edges of the table, or "left_right" if they are the left and right edges. Judge by the side pockets, not by apparent length, since perspective can make the long rails look short.`;
 
 async function call({ apiKey, model, image, prompt, schema, signal, parts }) {
   const res = await fetch(endpoint(model), {
@@ -164,7 +170,9 @@ export async function detectCorners({ apiKey, model, source, signal }) {
     .filter((c) => Array.isArray(c.point) && c.point.length === 2)
     .map(({ point: [y, x] }) => [(x / 1000) * source.width, (y / 1000) * source.height]);
   if (pts.length !== 4) throw new Error(`角を 4 点検出できませんでした (${pts.length} 点)`);
-  return pts;
+  // 'landscape': 画像上で長辺が上下 / 'portrait': 長辺が左右
+  const orientation = r.long_rails === 'top_bottom' ? 'landscape' : r.long_rails === 'left_right' ? 'portrait' : null;
+  return { pts, orientation };
 }
 
 const CLASSIFY_SCHEMA = {
