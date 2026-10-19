@@ -119,7 +119,7 @@ export class TopView {
     return this.toTable(px, py);
   }
 
-  render({ balls, selected = -1, bg = null, ballAlpha = 1, grid = {} }) {
+  render({ balls, selected = -1, bg = null, ballAlpha = 1, grid = {}, guide = -1 }) {
     const { canvas, L, W, rail, s, landW, landH } = this;
     const ctx = canvas.getContext('2d');
     ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -212,6 +212,17 @@ export class TopView {
       ctx.beginPath();
       ctx.arc(cx, cy, 3, 0, Math.PI * 2);
       ctx.fill();
+    }
+
+    // ドラッグ中のボールの位置を読むための補助線 (指でボールが隠れるので、レールのダイヤモンドまで伸ばす)
+    const g = balls[guide];
+    if (g) {
+      ctx.strokeStyle = '#ffd400';
+      ctx.lineWidth = 3;
+      ctx.setLineDash([8, 6]);
+      line(g.x, -rail, g.x, W + rail);
+      line(-rail, g.y, L + rail, g.y);
+      ctx.setLineDash([]);
     }
 
     ctx.setTransform(1, 0, 0, 1, 0, 0);

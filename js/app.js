@@ -543,6 +543,7 @@ function render(now) {
     bg,
     ballAlpha: bg ? +$('#opacity').value : 1,
     grid: { point: state.settings.gridPoint, half: state.settings.gridHalf },
+    guide: topDrag && !topDrag.out ? topDrag.i : -1,
   });
   state.dirty = false;
 }
@@ -1005,7 +1006,7 @@ async function shareLayout() {
   const url = shareURL();
   if (navigator.share) {
     try {
-      await navigator.share({ title: title || 'Ball Projection', url });
+      await navigator.share({ title: title || '配置さん', url });
       return setStatus('共有しました');
     } catch (e) {
       if (e.name === 'AbortError') return;
