@@ -1,4 +1,7 @@
-# Ball Projection
+# 配置さん
+
+<img src="icons/icon-192.png" width="96" alt="配置さん">
+
 
 ビリヤードのボール配置を仮想台 (真上視点) に並べて、保存・共有する HTML アプリ。
 有名な試合の配置を取り込んで自分で再現する、といった使い方を想定している。
@@ -42,6 +45,10 @@ Settings → Pages → Source を「Deploy from a branch」、ブランチ `main
    - 1→2 の辺が長辺になる。向きが違えば「角の割当を回転」。
 4. 4隅を指定すると、配置タブの配置がカメラ画像に重ねて表示される。実際の台にボールを並べて再現するときの目安にできる。
 5. 「ボール検出」で写っているボールを読み取り、配置を置き換える (角が未設定なら角検出も行う)。カメラ固定なら「連続検出」で一定間隔ごとに再検出。
+
+## アイコン
+
+`icons/icon.svg` (角丸, favicon) / `icons/icon-full.svg` (PNG 書き出し元) / `icons/icon-maskable.svg` (Android のマスク用に縮小) が元データ。PNG (`icon-192.png`, `icon-512.png`, `icon-maskable-512.png`, `apple-touch-icon.png`, `favicon-32.png`) はこれをブラウザで書き出したもの。`manifest.webmanifest` でホーム画面に追加できる。
 
 ## 仕組み
 
