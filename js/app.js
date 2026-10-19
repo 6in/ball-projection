@@ -23,6 +23,7 @@ const DEFAULT_SETTINGS = {
   uniqueNumbers: true, // 番号を重複させない
   gridPoint: true, // 仮想台のポイント線
   gridHalf: true, // 仮想台の半ポイント線
+  shootOrientation: 'auto', // カメラ画像での台の写り方: auto / landscape (長辺が上下) / portrait (長辺が左右)
 };
 
 const state = {
@@ -253,7 +254,7 @@ function updateHint() {
   if (!state.mode) t = 'カメラを開始するか画像を開いてください。';
   else if (state.editCorners && state.corners.length < 4)
     t = `プレイエリアの角 (クッションのノーズ線の交点) をクリック: ${state.corners.length + 1} / 4 点目`;
-  else if (state.editCorners) t = '角の丸をドラッグして微調整。1→2 が長辺になっていなければ「角の割当を回転」。';
+  else if (state.editCorners) t = '角の丸をドラッグして微調整。1→2 が長辺。違っていれば「台の写り方」を指定するか「角の割当を回転」。';
   else if (state.corners.length < 4) t = '「角を指定」で台の4隅を指定するか「AIで角検出」を押してください。';
   else t = 'ボールはカメラ画像上 / 仮想台上どちらでもドラッグで修正できます。';
   $('#hint').textContent = t;
@@ -275,17 +276,22 @@ function updateH() {
 }
 
 // 4点を時計回りに並べ、画像上で長く見える辺を 1→2 (長辺) に割り当てる
-function orderCorners(pts) {
+// orientation: 'landscape' = 画像上で長辺が上下、'portrait' = 長辺が左右、'auto' = 長く見える辺を長辺とみなす
+function orderCorners(pts, orientation = state.settings.shootOrientation) {
   const cx = pts.reduce((s, p) => s + p[0], 0) / 4;
   const cy = pts.reduce((s, p) => s + p[1], 0) / 4;
   const sorted = [...pts].sort((a, b) => Math.atan2(a[1] - cy, a[0] - cx) - Math.atan2(b[1] - cy, b[0] - cx));
-  let start = 0;
-  sorted.forEach((p, i) => {
-    if (p[0] + p[1] < sorted[start][0] + sorted[start][1]) start = i;
-  });
+  // 左上 = 上側 2 点のうち左の点 (x+y 最小だと、手前が広い台形で左下を選んでしまう)
+  const top2 = [...sorted].sort((a, b) => a[1] - b[1]).slice(0, 2);
+  const tl = top2[0][0] <= top2[1][0] ? top2[0] : top2[1];
+  const start = sorted.indexOf(tl);
   const o = [...sorted.slice(start), ...sorted.slice(0, start)];
+  // o は画像上の 左上, 右上, 右下, 左下。1→2 の辺が台の長辺になるよう回す
   const d = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]);
-  if (d(o[1], o[2]) + d(o[3], o[0]) > d(o[0], o[1]) + d(o[2], o[3])) o.push(o.shift());
+  const portrait =
+    orientation === 'portrait' ||
+    (orientation !== 'landscape' && d(o[1], o[2]) + d(o[3], o[0]) > d(o[0], o[1]) + d(o[2], o[3]));
+  if (portrait) o.push(o.shift());
   return o;
 }
 
@@ -436,8 +442,10 @@ async function withBusy(label, fn) {
 }
 
 async function runAutoCorners(frame = currentFrame()) {
-  const pts = await detectCorners({ apiKey: state.settings.apiKey, model: state.settings.model, source: frame });
-  state.corners = orderCorners(pts);
+  const { pts, orientation } = await detectCorners({ apiKey: state.settings.apiKey, model: state.settings.model, source: frame });
+  // 自動のときは AI の判定 (サイドポケットのある辺) を優先する
+  const mode = state.settings.shootOrientation;
+  state.corners = orderCorners(pts, mode === 'auto' && orientation ? orientation : mode);
   updateH();
   saveLayout();
   updateHint();
@@ -1086,6 +1094,18 @@ async function init() {
     view.classList.toggle('editing', state.editCorners);
     updateH();
     updateHint();
+  };
+  const so = $('#shootOrientation');
+  so.value = state.settings.shootOrientation;
+  so.onchange = () => {
+    state.settings.shootOrientation = so.value;
+    saveSettings();
+    // 指定済みの角も新しい向きで割り当て直す
+    if (state.corners.length === 4) {
+      state.corners = orderCorners(state.corners);
+      updateH();
+      saveLayout();
+    }
   };
   $('#btnRotate').onclick = () => {
     if (state.corners.length !== 4) return;

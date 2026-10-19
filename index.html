@@ -88,6 +88,15 @@
         <label class="btn">画像を開く<input type="file" id="fileInput" accept="image/*" hidden></label>
       </div>
       <div class="toolbar">
+        <label>台の写り方
+          <select id="shootOrientation">
+            <option value="auto">自動</option>
+            <option value="landscape">長辺が上下 (横長)</option>
+            <option value="portrait">長辺が左右 (縦長)</option>
+          </select>
+        </label>
+      </div>
+      <div class="toolbar">
         <button id="btnEditCorners">角を指定</button>
         <button id="btnRotate" title="台の長辺/向きが逆のとき">角の割当を回転</button>
         <button id="btnAutoCorners">AIで角検出</button>
